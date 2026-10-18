@@ -23,27 +23,27 @@ const CARGO_SUPORTE = '🎟️ | Perm Ticket';
 
 const TIPOS_TICKET = {
 suporte: {
-nome: '🎟️・suporte',
+nome: 'suporte',
 titulo: 'Suporte',
 descricao: 'Precisa de ajuda? Explique seu problema para nossa equipe.'
 },
 duvidas: {
-nome: '❓・duvidas',
+nome: 'duvidas',
 titulo: 'Dúvidas',
 descricao: 'Escreva sua pergunta para nossa equipe.'
 },
 bug: {
-nome: '🐛・relatar-bug',
+nome: 'relatar-bug',
 titulo: 'Relatar Bug',
 descricao: 'Descreva o erro encontrado e como podemos reproduzi-lo.'
 },
 parceria: {
-nome: '🤝・parceria',
+nome: 'parceria',
 titulo: 'Parceria',
 descricao: 'Apresente sua proposta de parceria.'
 },
 vender: {
-nome: '💰・vender',
+nome: 'vender',
 titulo: 'Vender',
 descricao: 'Explique o assunto relacionado a vendas.'
 }
@@ -69,7 +69,7 @@ console.log('✅ Comando /ticket registrado!');
 }
 
 client.once('ready', async () => {
-console.log(`🤖 Bot online: ${client.user.tag}`);
+console.log('🤖 Bot online: ' + client.user.tag);
 
 ```
 try {
@@ -83,11 +83,13 @@ try {
 
 client.on('interactionCreate', async interaction => {
 try {
+// ENVIAR PAINEL
 if (
 interaction.isChatInputCommand() &&
 interaction.commandName === 'ticket'
 ) {
-if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+if (!interaction.memberPermissions ||
+!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
 return interaction.reply({
 content: '❌ Apenas administradores podem enviar o painel.',
 ephemeral: true
@@ -163,6 +165,7 @@ ephemeral: true
         });
     }
 
+    // CRIAR TICKET
     if (
         interaction.isStringSelectMenu() &&
         interaction.customId === 'selecionar_ticket'
@@ -180,14 +183,16 @@ ephemeral: true
             });
         }
 
+        const topicoUsuario = 'ticket-user:' + usuario.id;
+
         const existente = guild.channels.cache.find(c =>
             c.type === ChannelType.GuildText &&
-            c.topic === `ticket-user:${usuario.id}`
+            c.topic === topicoUsuario
         );
 
         if (existente) {
             return interaction.editReply({
-                content: `⚠️ Você já possui um ticket aberto: ${existente}`
+                content: '⚠️ Você já possui um ticket aberto: ' + existente
             });
         }
 
@@ -198,7 +203,8 @@ ephemeral: true
 
         if (!categoria) {
             return interaction.editReply({
-                content: `❌ Não encontrei a categoria "${CATEGORIA_TICKETS}".`
+                content: '❌ Não encontrei a categoria "' +
+                    CATEGORIA_TICKETS + '".'
             });
         }
 
@@ -208,7 +214,8 @@ ephemeral: true
 
         if (!cargo) {
             return interaction.editReply({
-                content: `❌ Não encontrei o cargo "${CARGO_SUPORTE}".`
+                content: '❌ Não encontrei o cargo "' +
+                    CARGO_SUPORTE + '".'
             });
         }
 
@@ -216,7 +223,7 @@ ephemeral: true
             name: configuracao.nome,
             type: ChannelType.GuildText,
             parent: categoria.id,
-            topic: `ticket-user:${usuario.id}`,
+            topic: topicoUsuario,
             permissionOverwrites: [
                 {
                     id: guild.roles.everyone.id,
@@ -255,10 +262,10 @@ ephemeral: true
 
         const embedTicket = new EmbedBuilder()
             .setColor(0xC8102E)
-            .setTitle(`🎟️ Atendimento: ${configuracao.titulo}`)
+            .setTitle('🎟️ Atendimento: ' + configuracao.titulo)
             .setDescription(
-                `Olá, ${usuario}!\n\n` +
-                `${configuracao.descricao}\n\n` +
+                'Olá, ' + usuario + '!\n\n' +
+                configuracao.descricao + '\n\n' +
                 'Nossa equipe responderá assim que possível.\n\n' +
                 '🔒 Este canal é privado. Quando terminar, clique no botão abaixo.'
             )
@@ -274,7 +281,7 @@ ephemeral: true
             .setStyle(ButtonStyle.Danger);
 
         await canal.send({
-            content: `${usuario} <@&${cargo.id}>`,
+            content: usuario.toString() + ' <@&' + cargo.id + '>',
             embeds: [embedTicket],
             components: [
                 new ActionRowBuilder().addComponents(fechar)
@@ -282,10 +289,11 @@ ephemeral: true
         });
 
         return interaction.editReply({
-            content: `✅ Seu ticket foi aberto: ${canal}`
+            content: '✅ Seu ticket foi aberto: ' + canal
         });
     }
 
+    // FECHAR TICKET
     if (
         interaction.isButton() &&
         interaction.customId === 'fechar_ticket'
@@ -294,7 +302,8 @@ ephemeral: true
         const usuario = interaction.user;
         const guild = interaction.guild;
 
-        if (!canal.topic || !canal.topic.startsWith('ticket-user:')) {
+        if (!canal.topic ||
+            !canal.topic.startsWith('ticket-user:')) {
             return interaction.reply({
                 content: '❌ Este canal não foi reconhecido como ticket.',
                 ephemeral: true
@@ -306,8 +315,13 @@ ephemeral: true
         );
 
         const membro = await guild.members.fetch(usuario.id);
-        const criador = canal.topic === `ticket-user:${usuario.id}`;
-        const suporte = cargo && membro.roles.cache.has(cargo.id);
+
+        const criador =
+            canal.topic === 'ticket-user:' + usuario.id;
+
+        const suporte =
+            cargo && membro.roles.cache.has(cargo.id);
+
         const admin = membro.permissions.has(
             PermissionFlagsBits.Administrator
         );
@@ -334,10 +348,13 @@ ephemeral: true
 } catch (erro) {
     console.error('❌ Erro na interação:', erro);
 
-    const mensagem = '❌ Ocorreu um erro. Confira as permissões e os logs da hospedagem.';
+    const mensagem =
+        '❌ Ocorreu um erro. Confira as permissões e os logs da hospedagem.';
 
     if (interaction.deferred) {
-        await interaction.editReply({ content: mensagem }).catch(() => {});
+        await interaction.editReply({
+            content: mensagem
+        }).catch(() => {});
     } else if (interaction.replied) {
         await interaction.followUp({
             content: mensagem,
