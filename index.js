@@ -1461,7 +1461,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const campoComentario = new TextInputBuilder()
                 .setCustomId("comentario_atendimento")
-                .setLabel("Deixe uma mensagem de como foi seu atendimento")
+                .setLabel("Como foi seu atendimento?")
                 .setPlaceholder(
                     "Conte como foi sua experiência com nossa equipe..."
                 )
