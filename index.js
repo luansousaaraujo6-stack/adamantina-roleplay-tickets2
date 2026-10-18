@@ -23,27 +23,27 @@ const CARGO_SUPORTE = '🎟️ | Perm Ticket';
 
 const TIPOS_TICKET = {
 suporte: {
-nome: '🎟️・Suporte',
+nome: '🎟️・suporte',
 titulo: 'Suporte',
 descricao: 'Precisa de ajuda? Explique seu problema para nossa equipe.'
 },
 duvidas: {
-nome: '❓・Dúvidas',
+nome: '❓・duvidas',
 titulo: 'Dúvidas',
 descricao: 'Escreva sua pergunta para nossa equipe.'
 },
 bug: {
-nome: '🐛・Relatar-Bug',
+nome: '🐛・relatar-bug',
 titulo: 'Relatar Bug',
 descricao: 'Descreva o erro encontrado e como podemos reproduzi-lo.'
 },
 parceria: {
-nome: '🤝・Parceria',
+nome: '🤝・parceria',
 titulo: 'Parceria',
 descricao: 'Apresente sua proposta de parceria.'
 },
 vender: {
-nome: '💰・Vender',
+nome: '💰・vender',
 titulo: 'Vender',
 descricao: 'Explique o assunto relacionado a vendas.'
 }
@@ -87,7 +87,7 @@ if (
 interaction.isChatInputCommand() &&
 interaction.commandName === 'ticket'
 ) {
-if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
+if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
 return interaction.reply({
 content: '❌ Apenas administradores podem enviar o painel.',
 ephemeral: true
