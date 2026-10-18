@@ -1,0 +1,12 @@
+{
+"name": "adamantina-roleplay-tickets",
+"version": "1.0.0",
+"description": "Sistema de tickets da Adamantina Roleplay",
+"main": "index.js",
+"scripts": {
+"start": "node index.js"
+},
+"dependencies": {
+"discord.js": "^14.22.1"
+}
+}
