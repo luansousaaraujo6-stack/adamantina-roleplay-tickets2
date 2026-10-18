@@ -1,8 +1,8 @@
-// ============================================================
+//============================================================
 // ADAMANTINA ROLEPLAY | SISTEMA DE TICKETS
 // Arquivo: index.js
 // Discord.js v14
-// ============================================================
+//============================================================
 
 const {
     Client,
@@ -21,851 +21,828 @@ const {
     REST,
     Routes,
     SlashCommandBuilder,
-    MessageFlags,
     Events
-} = require('discord.js');
+} = require("discord.js");
 
-// ============================================================
+//============================================================
+// CONFIGURAÇÕES
+//============================================================
+
+const TOKEN = process.env.DISCORD_TOKEN;
+
+const GUILD_ID = "1553064455368347678";
+
+const CATEGORIA_TICKETS = "💎 | Suporte Adamantina";
+
+const CARGO_SUPORTE = "🎟️ | Perm Ticket";
+
+const CANAL_AVALIACOES = "1553992142635143178";
+
+const TEMPO_EXCLUSAO = 15000;
+
+//============================================================
 // CLIENT
-// ============================================================
+//============================================================
 
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds]
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers
+    ]
 });
 
-// ============================================================
-// CONFIGURAÇÕES
-// ============================================================
+// Impede registrar duas vezes a mesma avaliação durante
+// a execução atual do bot.
+const avaliacoesRegistradas = new Set();
 
-const GUILD_ID = '1553064455368347678';
+//============================================================
+// FUNÇÕES DE PERMISSÃO
+//============================================================
 
-const CATEGORIA_TICKETS = '💎 | Suporte Adamantina';
+// Verifica o cargo utilizando os dados já presentes
+// na interação. Não busca todos os membros do servidor.
 
-const CARGO_SUPORTE = '🎟️ | Perm Ticket';
-
-const CANAL_AVALIACOES = '1553992142635143178';
-
-const COR_PRINCIPAL = 0xC8102E;
-const COR_SUCESSO = 0x2ECC71;
-const COR_AVALIACAO = 0xF1C40F;
-
-// ============================================================
-// TIPOS DE TICKET
-// ============================================================
-
-const TIPOS_TICKET = {
-    suporte: {
-        nome: 'suporte',
-        titulo: 'Suporte',
-        descricao: 'Precisa de ajuda? Explique seu problema para nossa equipe.',
-        emoji: '🎟️'
-    },
-
-    duvidas: {
-        nome: 'duvidas',
-        titulo: 'Dúvidas',
-        descricao: 'Escreva sua pergunta para nossa equipe.',
-        emoji: '❓'
-    },
-
-    bug: {
-        nome: 'relatar-bug',
-        titulo: 'Relatar Bug',
-        descricao: 'Descreva o erro encontrado e como podemos reproduzi-lo.',
-        emoji: '🐛'
-    },
-
-    parceria: {
-        nome: 'parceria',
-        titulo: 'Parceria',
-        descricao: 'Apresente sua proposta de parceria.',
-        emoji: '🤝'
-    },
-
-    vender: {
-        nome: 'vender',
-        titulo: 'Vender',
-        descricao: 'Explique o assunto relacionado a vendas.',
-        emoji: '💰'
-    }
-};
-
-// ============================================================
-// UTILITÁRIOS DE TICKET
-// ============================================================
-
-function lerTopico(canal) {
-    const topico = canal.topic || '';
-
-    const dados = {};
-
-    for (const parte of topico.split('|')) {
-        const indice = parte.indexOf(':');
-
-        if (indice === -1) continue;
-
-        const chave = parte.slice(0, indice);
-        const valor = parte.slice(indice + 1);
-
-        dados[chave] = valor;
-    }
-
-    return dados;
-}
-
-function criarTopico(dados) {
-    return [
-        'ticket-user:' + dados.user,
-        'ticket-type:' + dados.type,
-        'attendant:' + (dados.attendant || 'none'),
-        'status:' + (dados.status || 'open')
-    ].join('|');
-}
-
-async function atualizarTopico(canal, alteracoes = {}) {
-    const dados = lerTopico(canal);
-
-    const usuario = dados['ticket-user'];
-    const tipo = dados['ticket-type'];
-
-    const atendente =
-        alteracoes.attendant !== undefined
-            ? alteracoes.attendant
-            : dados.attendant;
-
-    const status =
-        alteracoes.status !== undefined
-            ? alteracoes.status
-            : dados.status;
-
-    await canal.setTopic(
-        criarTopico({
-            user: usuario,
-            type: tipo,
-            attendant: atendente,
-            status: status
-        })
-    );
-
-    return lerTopico(canal);
-}
-
-function ehTicket(canal) {
-    if (!canal || canal.type !== ChannelType.GuildText) {
+function temCargoNaInteracao(interaction, cargoId) {
+    if (!interaction.member || !cargoId) {
         return false;
     }
 
-    const dados = lerTopico(canal);
+    const roles = interaction.member.roles;
 
-    return Boolean(
-        dados['ticket-user'] &&
-        dados['ticket-type']
-    );
-}
-
-function obterConfiguracao(canal) {
-    const dados = lerTopico(canal);
-
-    return TIPOS_TICKET[dados['ticket-type']] || {
-        titulo: 'Atendimento',
-        emoji: '🎟️',
-        descricao: 'Atendimento da Adamantina Roleplay.'
-    };
-}
-
-function criarEmbedTicket(canal, statusPersonalizado) {
-    const dados = lerTopico(canal);
-    const configuracao = obterConfiguracao(canal);
-
-    const usuarioId = dados['ticket-user'];
-
-    const atendenteId =
-        dados.attendant && dados.attendant !== 'none'
-            ? dados.attendant
-            : null;
-
-    const status = statusPersonalizado ||
-        (dados.status === 'open'
-            ? '🟡 Aguardando atendimento'
-            : '🔴 Encerrado');
-
-    const embed = new EmbedBuilder()
-        .setColor(COR_PRINCIPAL)
-        .setTitle(
-            configuracao.emoji +
-            ' ADAMANTINA ROLEPLAY | ' +
-            configuracao.titulo.toUpperCase()
-        )
-        .setDescription(
-            'Bem-vindo à central de atendimento da **Adamantina Roleplay**!\n\n' +
-            configuracao.descricao +
-            '\n\n' +
-            'Nossa equipe atenderá você assim que possível.'
-        )
-        .addFields(
-            {
-                name: '👤 Usuário',
-                value: '<@' + usuarioId + '>',
-                inline: true
-            },
-            {
-                name: '🟢 Atendente',
-                value: atendenteId
-                    ? '<@' + atendenteId + '>'
-                    : 'Nenhum',
-                inline: true
-            },
-            {
-                name: '📌 Status',
-                value: status,
-                inline: false
-            }
-        )
-        .setFooter({
-            text: 'Adamantina Roleplay • Central de Atendimento'
-        })
-        .setTimestamp();
-
-    return embed;
-}
-
-function criarBotoesTicket() {
-    const assumir = new ButtonBuilder()
-        .setCustomId('ticket_assumir')
-        .setLabel('Assumir')
-        .setEmoji('🟢')
-        .setStyle(ButtonStyle.Success);
-
-    const fechar = new ButtonBuilder()
-        .setCustomId('ticket_fechar')
-        .setLabel('Fechar')
-        .setEmoji('🔒')
-        .setStyle(ButtonStyle.Danger);
-
-    const painel = new ButtonBuilder()
-        .setCustomId('ticket_painel_adm')
-        .setLabel('Painel ADM')
-        .setEmoji('⚙️')
-        .setStyle(ButtonStyle.Secondary);
-
-    return new ActionRowBuilder().addComponents(
-        assumir,
-        fechar,
-        painel
-    );
-}
-
-function criarBotoesAvaliacao(usuarioId, atendenteId, tipo, ticketId) {
-    const botoes = [];
-
-    for (let nota = 1; nota <= 5; nota++) {
-        botoes.push(
-            new ButtonBuilder()
-                .setCustomId(
-                    'avaliar:' +
-                    nota + ':' +
-                    usuarioId + ':' +
-                    atendenteId + ':' +
-                    tipo + ':' +
-                    ticketId
-                )
-                .setLabel(String(nota))
-                .setEmoji('⭐')
-                .setStyle(
-                    nota <= 2
-                        ? ButtonStyle.Danger
-                        : nota === 3
-                            ? ButtonStyle.Secondary
-                            : ButtonStyle.Success
-                )
-        );
+    if (Array.isArray(roles)) {
+        return roles.includes(cargoId);
     }
 
-    return new ActionRowBuilder().addComponents(botoes);
+    if (roles?.cache) {
+        return roles.cache.has(cargoId);
+    }
+
+    return false;
 }
 
-async function obterCargoSuporte(guild) {
+// Verifica se o usuário é administrador.
+
+function ehAdministrador(interaction) {
+    return Boolean(
+        interaction.memberPermissions?.has(
+            PermissionFlagsBits.Administrator
+        )
+    );
+}
+
+// Busca o cargo de suporte pelo nome.
+
+function obterCargoSuporte(guild) {
     return guild.roles.cache.find(
-        cargo => cargo.name === CARGO_SUPORTE
+        role => role.name === CARGO_SUPORTE
     ) || null;
 }
 
-async function membroEhEquipe(interaction) {
-    const cargo = await obterCargoSuporte(interaction.guild);
+// Verifica se o usuário pertence à equipe.
 
-    if (!cargo) return false;
+function ehEquipe(interaction) {
+    if (ehAdministrador(interaction)) {
+        return true;
+    }
 
-    const membro = await interaction.guild.members.fetch(
-        interaction.user.id
-    );
+    const cargo = obterCargoSuporte(interaction.guild);
 
-    return membro.roles.cache.has(cargo.id);
-}
-
-async function membroEhAdministrador(interaction) {
-    const membro = await interaction.guild.members.fetch(
-        interaction.user.id
-    );
-
-    return membro.permissions.has(
-        PermissionFlagsBits.Administrator
-    );
-}
-
-async function podeGerenciarTicket(interaction) {
-    const dados = lerTopico(interaction.channel);
-
-    if (dados.attendant !== interaction.user.id) {
+    if (!cargo) {
         return false;
     }
 
-    return true;
+    return temCargoNaInteracao(interaction, cargo.id);
 }
 
-// ============================================================
-// COMANDO /TICKET
-// ============================================================
+//============================================================
+// METADADOS DO TICKET
+//============================================================
 
-async function registrarComando() {
-    const comando = new SlashCommandBuilder()
-        .setName('ticket')
+// Formato do tópico:
+// ticket-user:ID|ticket-type:TIPO|attendant:ID|status:open
+
+function criarTopico(usuarioId, tipo, atendenteId, status) {
+    return [
+        `ticket-user:${usuarioId}`,
+        `ticket-type:${tipo}`,
+        `attendant:${atendenteId || "none"}`,
+        `status:${status}`
+    ].join("|");
+}
+
+// Lê os dados do tópico.
+
+function lerTopico(canal) {
+    const resultado = {
+        usuarioId: null,
+        tipo: null,
+        atendenteId: null,
+        status: "open"
+    };
+
+    if (!canal?.topic) {
+        return resultado;
+    }
+
+    const partes = canal.topic.split("|");
+
+    for (const parte of partes) {
+        const separador = parte.indexOf(":");
+
+        if (separador === -1) {
+            continue;
+        }
+
+        const chave = parte.slice(0, separador);
+        const valor = parte.slice(separador + 1);
+
+        if (chave === "ticket-user") {
+            resultado.usuarioId = valor;
+        }
+
+        if (chave === "ticket-type") {
+            resultado.tipo = valor;
+        }
+
+        if (chave === "attendant") {
+            resultado.atendenteId =
+                valor === "none" ? null : valor;
+        }
+
+        if (chave === "status") {
+            resultado.status = valor;
+        }
+    }
+
+    return resultado;
+}
+
+// Atualiza os metadados do ticket.
+
+async function atualizarTopico(
+    canal,
+    dados
+) {
+    const atuais = lerTopico(canal);
+
+    const usuarioId =
+        dados.usuarioId ?? atuais.usuarioId;
+
+    const tipo =
+        dados.tipo ?? atuais.tipo;
+
+    const atendenteId =
+        dados.atendenteId !== undefined
+            ? dados.atendenteId
+            : atuais.atendenteId;
+
+    const status =
+        dados.status ?? atuais.status;
+
+    await canal.setTopic(
+        criarTopico(
+            usuarioId,
+            tipo,
+            atendenteId,
+            status
+        )
+    );
+}
+
+// Verifica se um canal é um ticket.
+
+function ehTicket(canal) {
+    const dados = lerTopico(canal);
+
+    return Boolean(
+        dados.usuarioId &&
+        dados.tipo
+    );
+}
+
+//============================================================
+// EMBED DO TICKET
+//============================================================
+
+function criarEmbedTicket(canal) {
+    const dados = lerTopico(canal);
+
+    const atendente = dados.atendenteId
+        ? `<@${dados.atendenteId}>`
+        : "Ninguém assumiu ainda.";
+
+    const fechado = dados.status === "closed";
+
+    return new EmbedBuilder()
+        .setColor(fechado ? 0x808080 : 0xD90429)
+        .setTitle("🎟️ Adamantina Roleplay | Ticket")
         .setDescription(
-            'Envia o painel de atendimento da Adamantina Roleplay'
+            "Bem-vindo ao atendimento do Adamantina Roleplay.\n\n" +
+            "A equipe responderá assim que possível."
+        )
+        .addFields(
+            {
+                name: "👤 Criador",
+                value: dados.usuarioId
+                    ? `<@${dados.usuarioId}>`
+                    : "Não identificado",
+                inline: true
+            },
+            {
+                name: "🎫 Categoria",
+                value: dados.tipo || "Não identificada",
+                inline: true
+            },
+            {
+                name: "🛠️ Atendente",
+                value: atendente,
+                inline: false
+            },
+            {
+                name: "📊 Status",
+                value: fechado
+                    ? "🔴 Fechado"
+                    : "🟢 Aberto",
+                inline: true
+            }
+        )
+        .setFooter({
+            text: "Adamantina Roleplay • Central de Atendimento"
+        })
+        .setTimestamp();
+}
+
+//============================================================
+// BOTÕES DO TICKET
+//============================================================
+
+function criarBotoesTicket(fechado = false) {
+    if (fechado) {
+        return [];
+    }
+
+    return [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId("ticket_assumir")
+                .setLabel("Assumir")
+                .setEmoji("🙋")
+                .setStyle(ButtonStyle.Success),
+
+            new ButtonBuilder()
+                .setCustomId("ticket_fechar")
+                .setLabel("Fechar")
+                .setEmoji("🔒")
+                .setStyle(ButtonStyle.Danger),
+
+            new ButtonBuilder()
+                .setCustomId("ticket_painel_adm")
+                .setLabel("Painel ADM")
+                .setEmoji("⚙️")
+                .setStyle(ButtonStyle.Secondary)
+        )
+    ];
+}
+
+//============================================================
+// PAINEL ADM
+//============================================================
+
+function criarPainelAdm() {
+    const embed = new EmbedBuilder()
+        .setColor(0xD90429)
+        .setTitle("⚙️ Painel Administrativo")
+        .setDescription(
+            "Gerencie este ticket utilizando as opções abaixo."
+        )
+        .addFields(
+            {
+                name: "🔔 Notificar",
+                value: "Enviar uma mensagem privada ao criador.",
+                inline: false
+            },
+            {
+                name: "✏️ Renomear",
+                value: "Alterar o nome do canal.",
+                inline: false
+            },
+            {
+                name: "🔄 Transferir",
+                value: "Transferir para outro atendente.",
+                inline: false
+            },
+            {
+                name: "➕ Adicionar jogador",
+                value: "Permitir que outro jogador veja o ticket.",
+                inline: false
+            }
         );
 
-    const rest = new REST({ version: '10' })
-        .setToken(process.env.DISCORD_TOKEN);
+    const linha = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setCustomId("adm_notificar")
+                .setLabel("Notificar")
+                .setEmoji("🔔")
+                .setStyle(ButtonStyle.Primary),
 
-    await rest.put(
-        Routes.applicationGuildCommands(
-            client.user.id,
-            GUILD_ID
-        ),
-        {
-            body: [comando.toJSON()]
-        }
-    );
+            new ButtonBuilder()
+                .setCustomId("adm_renomear")
+                .setLabel("Renomear")
+                .setEmoji("✏️")
+                .setStyle(ButtonStyle.Secondary),
 
-    console.log('✅ Comando /ticket registrado!');
+            new ButtonBuilder()
+                .setCustomId("adm_transferir")
+                .setLabel("Transferir")
+                .setEmoji("🔄")
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId("adm_adicionar")
+                .setLabel("Adicionar")
+                .setEmoji("➕")
+                .setStyle(ButtonStyle.Success)
+        );
+
+    return {
+        embeds: [embed],
+        components: [linha],
+        ephemeral: true
+    };
 }
 
-// ============================================================
-// BOT ONLINE
-// ============================================================
+//============================================================
+// VERIFICA SE O ATENDENTE PODE UTILIZAR O PAINEL
+//============================================================
+
+function ehAtendenteResponsavel(interaction) {
+    const dados = lerTopico(interaction.channel);
+
+    return Boolean(
+        dados.atendenteId &&
+        dados.atendenteId === interaction.user.id
+    );
+}
+
+//============================================================
+// COMANDO /TICKET
+//============================================================
+
+const comandoTicket = new SlashCommandBuilder()
+    .setName("ticket")
+    .setDescription("Enviar o painel de atendimento.")
+    .setDefaultMemberPermissions(
+        PermissionFlagsBits.Administrator
+    );
+
+//============================================================
+// INICIALIZAÇÃO
+//============================================================
 
 client.once(Events.ClientReady, async () => {
-    console.log('🤖 Bot online: ' + client.user.tag);
+    console.log(
+        `🤖 Bot online: ${client.user.tag}`
+    );
 
     try {
-        await registrarComando();
+        const rest = new REST({
+            version: "10"
+        }).setToken(TOKEN);
+
+        await rest.put(
+            Routes.applicationGuildCommands(
+                client.user.id,
+                GUILD_ID
+            ),
+            {
+                body: [comandoTicket.toJSON()]
+            }
+        );
+
+        console.log("✅ Comando /ticket registrado!");
     } catch (erro) {
         console.error(
-            '❌ Erro ao registrar o comando:',
+            "❌ Erro ao registrar /ticket:",
             erro
         );
     }
 });
 
-// ============================================================
+//============================================================
 // INTERAÇÕES
-// ============================================================
+//============================================================
 
-client.on(Events.InteractionCreate, async interaction => {
-    try {
+client.on(
+    Events.InteractionCreate,
+    async interaction => {
+        try {
 
-        // ====================================================
-        // COMANDO /TICKET
-        // ====================================================
+            //================================================
+            // COMANDO /TICKET
+            //================================================
 
-        if (
-            interaction.isChatInputCommand() &&
-            interaction.commandName === 'ticket'
-        ) {
-            if (
-                !interaction.memberPermissions ||
-                !interaction.memberPermissions.has(
-                    PermissionFlagsBits.Administrator
-                )
-            ) {
-                return interaction.reply({
-                    content:
-                        '❌ Apenas administradores podem enviar o painel.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
+            if (interaction.isChatInputCommand()) {
+                if (interaction.commandName !== "ticket") {
+                    return;
+                }
 
-            const embed = new EmbedBuilder()
-                .setColor(COR_PRINCIPAL)
-                .setTitle('🎟️ ADAMANTINA ROLEPLAY')
-                .setDescription(
-                    '**CENTRAL DE ATENDIMENTO**\n\n' +
-                    'Bem-vindo à central oficial de atendimento da **Adamantina Roleplay**!\n\n' +
-                    '🎟️ **Suporte** — Precisa de ajuda?\n' +
-                    '❓ **Dúvidas** — Tem alguma pergunta?\n' +
-                    '🐛 **Relatar Bug** — Encontrou algum erro?\n' +
-                    '🤝 **Parceria** — Deseja propor uma parceria?\n' +
-                    '💰 **Vender** — Assuntos relacionados a vendas.\n\n' +
-                    '🔒 Seu atendimento será privado.\n\n' +
-                    '👇 **Selecione uma opção abaixo para começar!**'
-                )
-                .setFooter({
-                    text:
-                        'Adamantina Roleplay • Central de Atendimento'
-                })
-                .setTimestamp();
+                if (!ehAdministrador(interaction)) {
+                    return interaction.reply({
+                        content:
+                            "❌ Somente administradores podem enviar o painel.",
+                        ephemeral: true
+                    });
+                }
 
-            const seletor = new StringSelectMenuBuilder()
-                .setCustomId('selecionar_ticket')
-                .setPlaceholder(
-                    '🎫 Selecione o tipo de atendimento'
-                )
-                .addOptions(
-                    {
-                        label: 'Suporte',
-                        value: 'suporte',
-                        emoji: '🎟️',
-                        description: 'Preciso de ajuda'
-                    },
-                    {
-                        label: 'Dúvidas',
-                        value: 'duvidas',
-                        emoji: '❓',
-                        description: 'Tenho uma pergunta'
-                    },
-                    {
-                        label: 'Relatar Bug',
-                        value: 'bug',
-                        emoji: '🐛',
-                        description: 'Encontrei um erro'
-                    },
-                    {
-                        label: 'Parceria',
-                        value: 'parceria',
-                        emoji: '🤝',
-                        description: 'Quero propor uma parceria'
-                    },
-                    {
-                        label: 'Vender',
-                        value: 'vender',
-                        emoji: '💰',
-                        description: 'Assunto relacionado a vendas'
-                    }
-                );
+                const menu = new StringSelectMenuBuilder()
+                    .setCustomId("ticket_tipo")
+                    .setPlaceholder("Selecione o tipo de atendimento")
+                    .addOptions(
+                        {
+                            label: "Suporte",
+                            description: "Preciso de ajuda.",
+                            value: "Suporte",
+                            emoji: "🛠️"
+                        },
+                        {
+                            label: "Dúvidas",
+                            description: "Tenho uma dúvida.",
+                            value: "Dúvidas",
+                            emoji: "❓"
+                        },
+                        {
+                            label: "Relatar Bug",
+                            description: "Reportar um problema.",
+                            value: "Relatar Bug",
+                            emoji: "🐛"
+                        },
+                        {
+                            label: "Parceria",
+                            description: "Propostas de parceria.",
+                            value: "Parceria",
+                            emoji: "🤝"
+                        },
+                        {
+                            label: "Vender",
+                            description: "Assuntos relacionados a vendas.",
+                            value: "Vender",
+                            emoji: "💰"
+                        }
+                    );
 
-            await interaction.channel.send({
-                embeds: [embed],
-                components: [
-                    new ActionRowBuilder().addComponents(seletor)
-                ]
-            });
-
-            return interaction.reply({
-                content: '✅ Painel enviado com sucesso!',
-                flags: MessageFlags.Ephemeral
-            });
-        }
-
-        // ====================================================
-        // CRIAR TICKET
-        // ====================================================
-
-        if (
-            interaction.isStringSelectMenu() &&
-            interaction.customId === 'selecionar_ticket'
-        ) {
-            await interaction.deferReply({
-                flags: MessageFlags.Ephemeral
-            });
-
-            const guild = interaction.guild;
-            const usuario = interaction.user;
-            const tipo = interaction.values[0];
-
-            const configuracao = TIPOS_TICKET[tipo];
-
-            if (!configuracao) {
-                return interaction.editReply({
-                    content: '❌ Tipo de atendimento inválido.'
-                });
-            }
-
-            const existente = guild.channels.cache.find(c => {
-                if (!ehTicket(c)) return false;
-
-                const dados = lerTopico(c);
-
-                return (
-                    dados['ticket-user'] === usuario.id &&
-                    dados.status !== 'closed'
-                );
-            });
-
-            if (existente) {
-                return interaction.editReply({
-                    content:
-                        '⚠️ Você já possui um ticket aberto: ' +
-                        existente
-                });
-            }
-
-            const categoria = guild.channels.cache.find(c =>
-                c.type === ChannelType.GuildCategory &&
-                c.name === CATEGORIA_TICKETS
-            );
-
-            if (!categoria) {
-                return interaction.editReply({
-                    content:
-                        '❌ Não encontrei a categoria "' +
-                        CATEGORIA_TICKETS + '".'
-                });
-            }
-
-            const cargo = await obterCargoSuporte(guild);
-
-            if (!cargo) {
-                return interaction.editReply({
-                    content:
-                        '❌ Não encontrei o cargo "' +
-                        CARGO_SUPORTE + '".'
-                });
-            }
-
-            const canal = await guild.channels.create({
-                name: configuracao.nome,
-                type: ChannelType.GuildText,
-                parent: categoria.id,
-
-                topic: criarTopico({
-                    user: usuario.id,
-                    type: tipo,
-                    attendant: 'none',
-                    status: 'open'
-                }),
-
-                permissionOverwrites: [
-                    {
-                        id: guild.roles.everyone.id,
-                        deny: [
-                            PermissionFlagsBits.ViewChannel
-                        ]
-                    },
-                    {
-                        id: usuario.id,
-                        allow: [
-                            PermissionFlagsBits.ViewChannel,
-                            PermissionFlagsBits.SendMessages,
-                            PermissionFlagsBits.ReadMessageHistory,
-                            PermissionFlagsBits.AttachFiles,
-                            PermissionFlagsBits.EmbedLinks
-                        ]
-                    },
-                    {
-                        id: cargo.id,
-                        allow: [
-                            PermissionFlagsBits.ViewChannel,
-                            PermissionFlagsBits.SendMessages,
-                            PermissionFlagsBits.ReadMessageHistory,
-                            PermissionFlagsBits.AttachFiles,
-                            PermissionFlagsBits.EmbedLinks
-                        ]
-                    },
-                    {
-                        id: client.user.id,
-                        allow: [
-                            PermissionFlagsBits.ViewChannel,
-                            PermissionFlagsBits.SendMessages,
-                            PermissionFlagsBits.ReadMessageHistory,
-                            PermissionFlagsBits.ManageChannels,
-                            PermissionFlagsBits.EmbedLinks
-                        ]
-                    }
-                ]
-            });
-
-            const embed = criarEmbedTicket(canal);
-
-            await canal.send({
-                content:
-                    usuario.toString() +
-                    ' <@&' + cargo.id + '>',
-
-                embeds: [embed],
-
-                components: [
-                    criarBotoesTicket()
-                ]
-            });
-
-            return interaction.editReply({
-                content:
-                    '✅ Seu ticket foi aberto: ' + canal
-            });
-        }
-
-        // ====================================================
-        // ASSUMIR TICKET
-        // ====================================================
-
-        if (
-            interaction.isButton() &&
-            interaction.customId === 'ticket_assumir'
-        ) {
-            const canal = interaction.channel;
-
-            if (!ehTicket(canal)) {
-                return interaction.reply({
-                    content: '❌ Este canal não é um ticket válido.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const dados = lerTopico(canal);
-
-            if (dados.status === 'closed') {
-                return interaction.reply({
-                    content: '❌ Este ticket já está encerrado.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const equipe = await membroEhEquipe(interaction);
-            const admin = await membroEhAdministrador(interaction);
-
-            if (!equipe && !admin) {
-                return interaction.reply({
-                    content:
-                        '❌ Somente a equipe de atendimento pode assumir tickets.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            if (
-                dados.attendant &&
-                dados.attendant !== 'none'
-            ) {
-                return interaction.reply({
-                    content:
-                        '⚠️ Este ticket já foi assumido por <@' +
-                        dados.attendant + '>.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            await atualizarTopico(canal, {
-                attendant: interaction.user.id
-            });
-
-            await interaction.message.edit({
-                embeds: [
-                    criarEmbedTicket(
-                        canal,
-                        '🟢 Em atendimento'
+                const embed = new EmbedBuilder()
+                    .setColor(0xD90429)
+                    .setTitle("🎟️ Atendimento | Adamantina Roleplay")
+                    .setDescription(
+                        "Precisa de ajuda?\n\n" +
+                        "Selecione abaixo a categoria desejada " +
+                        "para abrir um ticket privado."
                     )
-                ],
-                components: [
-                    criarBotoesTicket()
-                ]
-            });
+                    .setFooter({
+                        text: "Adamantina Roleplay • Suporte"
+                    });
 
-            await canal.send({
-                content:
-                    '🟢 ' + interaction.user +
-                    ' assumiu este atendimento!'
-            });
-
-            return interaction.reply({
-                content: '✅ Você assumiu este ticket.',
-                flags: MessageFlags.Ephemeral
-            });
-        }
-
-        // ====================================================
-        // ABRIR PAINEL ADM
-        // ====================================================
-
-        if (
-            interaction.isButton() &&
-            interaction.customId === 'ticket_painel_adm'
-        ) {
-            if (!ehTicket(interaction.channel)) {
-                return interaction.reply({
-                    content: '❌ Este canal não é um ticket válido.',
-                    flags: MessageFlags.Ephemeral
+                await interaction.reply({
+                    embeds: [embed],
+                    components: [
+                        new ActionRowBuilder().addComponents(menu)
+                    ]
                 });
+
+                return;
             }
 
-            const dados = lerTopico(interaction.channel);
+            //================================================
+            // SELEÇÃO DA CATEGORIA
+            //================================================
 
             if (
-                !dados.attendant ||
-                dados.attendant === 'none'
+                interaction.isStringSelectMenu() &&
+                interaction.customId === "ticket_tipo"
             ) {
-                return interaction.reply({
-                    content:
-                        '⚠️ Primeiro, um atendente precisa assumir o ticket.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            if (!(await podeGerenciarTicket(interaction))) {
-                return interaction.reply({
-                    content:
-                        '❌ Somente o atendente responsável pode usar o Painel ADM.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const embed = new EmbedBuilder()
-                .setColor(COR_PRINCIPAL)
-                .setTitle('⚙️ PAINEL ADMINISTRATIVO')
-                .setDescription(
-                    'Gerencie o atendimento usando os botões abaixo.\n\n' +
-                    '🔔 **Notificar usuário:** envia uma DM ao criador.\n' +
-                    '✏️ **Renomear canal:** altera o nome do ticket.\n' +
-                    '🔄 **Transferir:** transfere o atendimento.\n' +
-                    '➕ **Adicionar:** permite incluir outro membro.'
-                )
-                .setFooter({
-                    text: 'Acesso exclusivo ao atendente responsável'
+                await interaction.deferReply({
+                    ephemeral: true
                 });
 
-            const notificar = new ButtonBuilder()
-                .setCustomId('adm_notificar')
-                .setLabel('Notificar usuário')
-                .setEmoji('🔔')
-                .setStyle(ButtonStyle.Primary);
+                const guild = interaction.guild;
+                const tipo = interaction.values[0];
 
-            const renomear = new ButtonBuilder()
-                .setCustomId('adm_renomear')
-                .setLabel('Renomear canal')
-                .setEmoji('✏️')
-                .setStyle(ButtonStyle.Secondary);
+                const categoria = guild.channels.cache.find(
+                    canal =>
+                        canal.type === ChannelType.GuildCategory &&
+                        canal.name === CATEGORIA_TICKETS
+                );
 
-            const transferir = new ButtonBuilder()
-                .setCustomId('adm_transferir')
-                .setLabel('Transferir')
-                .setEmoji('🔄')
-                .setStyle(ButtonStyle.Primary);
+                if (!categoria) {
+                    return interaction.editReply(
+                        "❌ Não encontrei a categoria de tickets. " +
+                        `Crie a categoria **${CATEGORIA_TICKETS}**.`
+                    );
+                }
 
-            const adicionar = new ButtonBuilder()
-                .setCustomId('adm_adicionar')
-                .setLabel('Adicionar')
-                .setEmoji('➕')
-                .setStyle(ButtonStyle.Success);
+                const cargoSuporte = obterCargoSuporte(guild);
 
-            return interaction.reply({
-                embeds: [embed],
-                components: [
-                    new ActionRowBuilder().addComponents(
-                        notificar,
-                        renomear
+                if (!cargoSuporte) {
+                    return interaction.editReply(
+                        "❌ Não encontrei o cargo de suporte: " +
+                        `**${CARGO_SUPORTE}**.`
+                    );
+                }
+
+                // Procura um ticket já existente sem buscar
+                // membros do servidor.
+
+                const ticketExistente = guild.channels.cache.find(
+                    canal => {
+                        if (!ehTicket(canal)) {
+                            return false;
+                        }
+
+                        const dados = lerTopico(canal);
+
+                        return (
+                            dados.usuarioId === interaction.user.id &&
+                            dados.status === "open"
+                        );
+                    }
+                );
+
+                if (ticketExistente) {
+                    return interaction.editReply(
+                        `❌ Você já possui um ticket aberto: ${ticketExistente}`
+                    );
+                }
+
+                const nomeUsuario = interaction.user.username
+                    .toLowerCase()
+                    .normalize("NFD")
+                    .replace(/[\u0300-\u036f]/g, "")
+                    .replace(/[^a-z0-9-]/g, "-")
+                    .replace(/-+/g, "-")
+                    .replace(/^-|-$/g, "")
+                    .slice(0, 40) || "usuario";
+
+                const nomeCanal =
+                    `ticket-${nomeUsuario}`.slice(0, 90);
+
+                const canal = await guild.channels.create({
+                    name: nomeCanal,
+                    type: ChannelType.GuildText,
+                    parent: categoria.id,
+
+                    topic: criarTopico(
+                        interaction.user.id,
+                        tipo,
+                        null,
+                        "open"
                     ),
-                    new ActionRowBuilder().addComponents(
-                        transferir,
-                        adicionar
-                    )
-                ],
-                flags: MessageFlags.Ephemeral
-            });
-        }
 
-        // ====================================================
-        // VALIDAR ACESSO AO PAINEL ADM
-        // ====================================================
-
-        if (
-            interaction.isButton() &&
-            [
-                'adm_notificar',
-                'adm_renomear',
-                'adm_transferir',
-                'adm_adicionar'
-            ].includes(interaction.customId)
-        ) {
-            if (!ehTicket(interaction.channel)) {
-                return interaction.reply({
-                    content: '❌ Ticket inválido.',
-                    flags: MessageFlags.Ephemeral
+                    permissionOverwrites: [
+                        {
+                            id: guild.roles.everyone.id,
+                            deny: [
+                                PermissionFlagsBits.ViewChannel
+                            ]
+                        },
+                        {
+                            id: interaction.user.id,
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory,
+                                PermissionFlagsBits.AttachFiles,
+                                PermissionFlagsBits.EmbedLinks
+                            ]
+                        },
+                        {
+                            id: cargoSuporte.id,
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory,
+                                PermissionFlagsBits.AttachFiles,
+                                PermissionFlagsBits.EmbedLinks
+                            ]
+                        }
+                    ]
                 });
-            }
 
-            if (!(await podeGerenciarTicket(interaction))) {
-                return interaction.reply({
+                const embed = criarEmbedTicket(canal);
+
+                await canal.send({
                     content:
-                        '❌ Somente o atendente responsável pode utilizar esta função.',
-                    flags: MessageFlags.Ephemeral
+                        `${interaction.user} <@&${cargoSuporte.id}>`,
+                    embeds: [embed],
+                    components: criarBotoesTicket()
                 });
+
+                await interaction.editReply(
+                    `✅ Seu ticket foi criado: ${canal}`
+                );
+
+                return;
             }
 
-            const dados = lerTopico(interaction.channel);
+            //================================================
+            // ASSUMIR TICKET
+            //================================================
 
-            if (dados.status === 'closed') {
-                return interaction.reply({
-                    content: '❌ Este ticket está encerrado.',
-                    flags: MessageFlags.Ephemeral
+            if (
+                interaction.isButton() &&
+                interaction.customId === "ticket_assumir"
+            ) {
+                const canal = interaction.channel;
+
+                if (!ehTicket(canal)) {
+                    return interaction.reply({
+                        content: "❌ Este canal não é um ticket válido.",
+                        ephemeral: true
+                    });
+                }
+
+                if (!ehEquipe(interaction)) {
+                    return interaction.reply({
+                        content:
+                            "❌ Você não tem permissão para assumir tickets.",
+                        ephemeral: true
+                    });
+                }
+
+                const dados = lerTopico(canal);
+
+                if (dados.status === "closed") {
+                    return interaction.reply({
+                        content: "❌ Este ticket já está fechado.",
+                        ephemeral: true
+                    });
+                }
+
+                if (dados.atendenteId) {
+                    return interaction.reply({
+                        content:
+                            `❌ Este ticket já foi assumido por <@${dados.atendenteId}>.`,
+                        ephemeral: true
+                    });
+                }
+
+                await atualizarTopico(canal, {
+                    atendenteId: interaction.user.id
                 });
+
+                await interaction.update({
+                    embeds: [criarEmbedTicket(canal)],
+                    components: criarBotoesTicket()
+                });
+
+                await canal.send({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor(0x2ECC71)
+                            .setDescription(
+                                `🙋 ${interaction.user} assumiu este ticket.`
+                            )
+                            .setTimestamp()
+                    ]
+                });
+
+                return;
             }
 
-            // -----------------------------------------------
-            // NOTIFICAR USUÁRIO
-            // -----------------------------------------------
+            //================================================
+            // ABRIR PAINEL ADM
+            //================================================
 
-            if (interaction.customId === 'adm_notificar') {
-                const usuarioId = dados['ticket-user'];
+            if (
+                interaction.isButton() &&
+                interaction.customId === "ticket_painel_adm"
+            ) {
+                const canal = interaction.channel;
+
+                if (!ehTicket(canal)) {
+                    return interaction.reply({
+                        content: "❌ Este canal não é um ticket válido.",
+                        ephemeral: true
+                    });
+                }
+
+                const dados = lerTopico(canal);
+
+                if (dados.status === "closed") {
+                    return interaction.reply({
+                        content: "❌ Este ticket já está fechado.",
+                        ephemeral: true
+                    });
+                }
+
+                // Somente o atendente responsável pode abrir
+                // o painel, sem buscar membros do servidor.
+
+                if (!ehAtendenteResponsavel(interaction)) {
+                    return interaction.reply({
+                        content:
+                            "❌ Somente o atendente responsável pode utilizar o Painel ADM.",
+                        ephemeral: true
+                    });
+                }
+
+                await interaction.reply(
+                    criarPainelAdm()
+                );
+
+                return;
+            }
+
+            //================================================
+            // NOTIFICAR CRIADOR
+            //================================================
+
+            if (
+                interaction.isButton() &&
+                interaction.customId === "adm_notificar"
+            ) {
+                if (!ehAtendenteResponsavel(interaction)) {
+                    return interaction.reply({
+                        content:
+                            "❌ Somente o atendente responsável pode usar esta opção.",
+                        ephemeral: true
+                    });
+                }
+
+                const dados = lerTopico(interaction.channel);
+
+                if (!dados.usuarioId) {
+                    return interaction.reply({
+                        content:
+                            "❌ Não consegui identificar o criador do ticket.",
+                        ephemeral: true
+                    });
+                }
 
                 try {
                     const usuario = await client.users.fetch(
-                        usuarioId
+                        dados.usuarioId
                     );
 
                     await usuario.send({
                         embeds: [
                             new EmbedBuilder()
-                                .setColor(COR_PRINCIPAL)
-                                .setTitle(
-                                    '🔔 ATUALIZAÇÃO DO SEU ATENDIMENTO'
-                                )
+                                .setColor(0xD90429)
+                                .setTitle("🔔 Atualização do seu atendimento")
                                 .setDescription(
-                                    'Olá! Você recebeu uma atualização no seu ticket da **Adamantina Roleplay**.\n\n' +
-                                    '🎫 **Canal:** #' +
-                                    interaction.channel.name +
-                                    '\n\n' +
-                                    'Acesse o servidor para continuar o atendimento.'
+                                    "A equipe do Adamantina Roleplay " +
+                                    "tem uma atualização sobre seu ticket."
                                 )
+                                .addFields({
+                                    name: "🎫 Ticket",
+                                    value: interaction.channel.name
+                                })
                                 .setTimestamp()
                         ]
                     });
 
                     return interaction.reply({
                         content:
-                            '✅ O usuário foi notificado por mensagem privada.',
-                        flags: MessageFlags.Ephemeral
+                            "✅ Notificação enviada ao criador por DM.",
+                        ephemeral: true
                     });
+
                 } catch (erro) {
                     return interaction.reply({
                         content:
-                            '❌ Não consegui enviar a DM. O usuário pode estar com mensagens privadas bloqueadas.',
-                        flags: MessageFlags.Ephemeral
+                            "❌ Não consegui enviar a DM. " +
+                            "O usuário pode estar com mensagens privadas bloqueadas.",
+                        ephemeral: true
                     });
                 }
             }
 
-            // -----------------------------------------------
-            // RENOMEAR CANAL
-            // -----------------------------------------------
+            //================================================
+            // RENOMEAR TICKET: ABRIR MODAL
+            //================================================
 
-            if (interaction.customId === 'adm_renomear') {
+            if (
+                interaction.isButton() &&
+                interaction.customId === "adm_renomear"
+            ) {
+                if (!ehAtendenteResponsavel(interaction)) {
+                    return interaction.reply({
+                        content:
+                            "❌ Somente o atendente responsável pode renomear o ticket.",
+                        ephemeral: true
+                    });
+                }
+
                 const modal = new ModalBuilder()
-                    .setCustomId('modal_renomear')
-                    .setTitle('Renomear ticket');
+                    .setCustomId("adm_renomear_modal")
+                    .setTitle("Renomear ticket");
 
                 const campo = new TextInputBuilder()
-                    .setCustomId('novo_nome')
-                    .setLabel('Novo nome do canal')
-                    .setPlaceholder('Exemplo: suporte-luan')
+                    .setCustomId("novo_nome")
+                    .setLabel("Novo nome do canal")
+                    .setPlaceholder("Exemplo: ticket-ajuda")
                     .setStyle(TextInputStyle.Short)
-                    .setMinLength(2)
+                    .setMinLength(1)
                     .setMaxLength(90)
                     .setRequired(true);
 
@@ -873,663 +850,805 @@ client.on(Events.InteractionCreate, async interaction => {
                     new ActionRowBuilder().addComponents(campo)
                 );
 
-                return interaction.showModal(modal);
+                await interaction.showModal(modal);
+
+                return;
             }
 
-            // -----------------------------------------------
-            // TRANSFERIR
-            // -----------------------------------------------
+            //================================================
+            // RENOMEAR TICKET: SALVAR
+            //================================================
 
-            if (interaction.customId === 'adm_transferir') {
-                const cargo = await obterCargoSuporte(
-                    interaction.guild
-                );
-
-                if (!cargo) {
-                    return interaction.reply({
-                        content: '❌ Cargo de suporte não encontrado.',
-                        flags: MessageFlags.Ephemeral
-                    });
-                }
-
-                await interaction.guild.members.fetch();
-
-                const membros = interaction.guild.members.cache
-                    .filter(membro =>
-                        membro.roles.cache.has(cargo.id) &&
-                        !membro.user.bot &&
-                        membro.id !== interaction.user.id
-                    )
-                    .first(25);
-
-                if (!membros || membros.length === 0) {
+            if (
+                interaction.isModalSubmit() &&
+                interaction.customId === "adm_renomear_modal"
+            ) {
+                if (!ehAtendenteResponsavel(interaction)) {
                     return interaction.reply({
                         content:
-                            '❌ Não encontrei outros atendentes disponíveis.',
-                        flags: MessageFlags.Ephemeral
+                            "❌ Somente o atendente responsável pode renomear o ticket.",
+                        ephemeral: true
                     });
                 }
 
-                const seletor = new StringSelectMenuBuilder()
-                    .setCustomId('transferir_selecionar')
-                    .setPlaceholder('Selecione o novo atendente')
-                    .addOptions(
-                        membros.map(membro => ({
-                            label: membro.displayName.slice(0, 100),
-                            description:
-                                ('@' + membro.user.username).slice(0, 100),
-                            value: membro.id
-                        }))
-                    );
+                const nomeInformado =
+                    interaction.fields.getTextInputValue("novo_nome");
 
-                return interaction.reply({
+                const novoNome = nomeInformado
+                    .toLowerCase()
+                    .normalize("NFD")
+                    .replace(/[\u0300-\u036f]/g, "")
+                    .replace(/[^a-z0-9-]/g, "-")
+                    .replace(/-+/g, "-")
+                    .replace(/^-|-$/g, "")
+                    .slice(0, 90);
+
+                if (!novoNome) {
+                    return interaction.reply({
+                        content:
+                            "❌ Informe um nome válido para o canal.",
+                        ephemeral: true
+                    });
+                }
+
+                await interaction.channel.setName(novoNome);
+
+                await interaction.reply({
                     content:
-                        '🔄 Selecione o atendente que receberá este ticket:',
-                    components: [
-                        new ActionRowBuilder().addComponents(seletor)
-                    ],
-                    flags: MessageFlags.Ephemeral
+                        `✅ Ticket renomeado para **${novoNome}**.`,
+                    ephemeral: true
                 });
+
+                return;
             }
 
-            // -----------------------------------------------
-            // ADICIONAR USUÁRIO
-            // -----------------------------------------------
+            //================================================
+            // TRANSFERIR TICKET: ABRIR SELETOR
+            //================================================
 
-            if (interaction.customId === 'adm_adicionar') {
+            if (
+                interaction.isButton() &&
+                interaction.customId === "adm_transferir"
+            ) {
+                if (!ehAtendenteResponsavel(interaction)) {
+                    return interaction.reply({
+                        content:
+                            "❌ Somente o atendente responsável pode transferir o ticket.",
+                        ephemeral: true
+                    });
+                }
+
                 const seletor = new UserSelectMenuBuilder()
-                    .setCustomId('adicionar_selecionar')
-                    .setPlaceholder('Selecione o jogador')
+                    .setCustomId("transferir_selecionar")
+                    .setPlaceholder("Selecione o novo atendente")
                     .setMinValues(1)
                     .setMaxValues(1);
 
-                return interaction.reply({
+                await interaction.reply({
                     content:
-                        '➕ Selecione o jogador que deseja adicionar ao ticket:',
+                        "🔄 Selecione o membro que receberá este ticket.\n" +
+                        "O jogador precisa possuir o cargo de suporte.",
                     components: [
                         new ActionRowBuilder().addComponents(seletor)
                     ],
-                    flags: MessageFlags.Ephemeral
+                    ephemeral: true
                 });
-            }
-        }
 
-        // ====================================================
-        // MODAL: RENOMEAR CANAL
-        // ====================================================
-
-        if (
-            interaction.isModalSubmit() &&
-            interaction.customId === 'modal_renomear'
-        ) {
-            if (!ehTicket(interaction.channel)) {
-                return interaction.reply({
-                    content: '❌ Ticket inválido.',
-                    flags: MessageFlags.Ephemeral
-                });
+                return;
             }
 
-            if (!(await podeGerenciarTicket(interaction))) {
-                return interaction.reply({
-                    content: '❌ Você não é o atendente responsável.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            let nome = interaction.fields
-                .getTextInputValue('novo_nome')
-                .toLowerCase()
-                .normalize('NFD')
-                .replace(/[\u0300-\u036f]/g, '')
-                .replace(/[^a-z0-9-]/g, '-')
-                .replace(/-+/g, '-')
-                .replace(/^-|-$/g, '')
-                .slice(0, 90);
-
-            if (!nome) {
-                return interaction.reply({
-                    content: '❌ Informe um nome válido.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            await interaction.channel.setName(nome);
-
-            return interaction.reply({
-                content: '✅ Canal renomeado para **' + nome + '**.',
-                flags: MessageFlags.Ephemeral
-            });
-        }
-
-        // ====================================================
-        // TRANSFERIR TICKET
-        // ====================================================
-
-        if (
-            interaction.isStringSelectMenu() &&
-            interaction.customId === 'transferir_selecionar'
-        ) {
-            if (!ehTicket(interaction.channel)) {
-                return interaction.reply({
-                    content: '❌ Ticket inválido.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            if (!(await podeGerenciarTicket(interaction))) {
-                return interaction.reply({
-                    content: '❌ Você não é o atendente responsável.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const novoAtendenteId = interaction.values[0];
-
-            const cargo = await obterCargoSuporte(
-                interaction.guild
-            );
-
-            const novoAtendente =
-                await interaction.guild.members.fetch(
-                    novoAtendenteId
-                ).catch(() => null);
+            //================================================
+            // TRANSFERIR TICKET: PROCESSAR SELEÇÃO
+            //================================================
 
             if (
-                !cargo ||
-                !novoAtendente ||
-                !novoAtendente.roles.cache.has(cargo.id)
+                interaction.isUserSelectMenu() &&
+                interaction.customId === "transferir_selecionar"
             ) {
-                return interaction.reply({
-                    content:
-                        '❌ O membro selecionado não pertence à equipe de suporte.',
-                    flags: MessageFlags.Ephemeral
+                await interaction.deferReply({
+                    ephemeral: true
                 });
-            }
 
-            await atualizarTopico(interaction.channel, {
-                attendant: novoAtendente.id
-            });
+                const canal = interaction.channel;
 
-            const mensagens = await interaction.channel.messages.fetch({
-                limit: 20
-            });
+                if (!ehTicket(canal)) {
+                    return interaction.editReply(
+                        "❌ Este canal não é um ticket válido."
+                    );
+                }
 
-            const mensagemPrincipal = mensagens.find(m =>
-                m.author.id === client.user.id &&
-                m.components.some(linha =>
-                    linha.components.some(botao =>
-                        botao.customId === 'ticket_assumir'
-                    )
-                )
-            );
+                if (!ehAtendenteResponsavel(interaction)) {
+                    return interaction.editReply(
+                        "❌ Somente o atendente responsável pode transferir o ticket."
+                    );
+                }
 
-            if (mensagemPrincipal) {
-                await mensagemPrincipal.edit({
-                    embeds: [
-                        criarEmbedTicket(
-                            interaction.channel,
-                            '🔄 Atendimento transferido'
+                const novoAtendenteId = interaction.values[0];
+
+                if (novoAtendenteId === interaction.user.id) {
+                    return interaction.editReply(
+                        "❌ Você já é o atendente responsável."
+                    );
+                }
+
+                const cargo = obterCargoSuporte(interaction.guild);
+
+                if (!cargo) {
+                    return interaction.editReply(
+                        `❌ O cargo **${CARGO_SUPORTE}** não foi encontrado.`
+                    );
+                }
+
+                // IMPORTANTE:
+                // Busca apenas o membro selecionado.
+                // Não utiliza guild.members.fetch() sem ID.
+
+                let novoAtendente;
+
+                try {
+                    novoAtendente =
+                        interaction.guild.members.cache.get(
+                            novoAtendenteId
+                        ) ||
+                        await interaction.guild.members.fetch(
+                            novoAtendenteId
+                        );
+
+                } catch (erro) {
+                    console.error(
+                        "Erro ao buscar novo atendente:",
+                        erro.message
+                    );
+
+                    return interaction.editReply(
+                        "❌ Não consegui verificar esse membro. " +
+                        "Tente selecioná-lo novamente."
+                    );
+                }
+
+                if (!novoAtendente.roles.cache.has(cargo.id)) {
+                    return interaction.editReply(
+                        `❌ ${novoAtendente} não possui o cargo de suporte.`
+                    );
+                }
+
+                const dados = lerTopico(canal);
+
+                if (dados.status === "closed") {
+                    return interaction.editReply(
+                        "❌ Este ticket já está fechado."
+                    );
+                }
+
+                await atualizarTopico(canal, {
+                    atendenteId: novoAtendente.id
+                });
+
+                await canal.permissionOverwrites.edit(
+                    novoAtendente.id,
+                    {
+                        ViewChannel: true,
+                        SendMessages: true,
+                        ReadMessageHistory: true,
+                        AttachFiles: true,
+                        EmbedLinks: true
+                    }
+                );
+
+                // Atualiza a mensagem principal do ticket.
+
+                await interaction.editReply(
+                    `✅ Ticket transferido para ${novoAtendente}.`
+                );
+
+                const mensagens =
+                    await canal.messages.fetch({
+                        limit: 50
+                    });
+
+                const mensagemPrincipal = mensagens.find(
+                    mensagem =>
+                        mensagem.author.id === client.user.id &&
+                        mensagem.embeds.some(
+                            embed =>
+                                embed.title ===
+                                "🎟️ Adamantina Roleplay | Ticket"
                         )
-                    ],
-                    components: [
-                        criarBotoesTicket()
+                );
+
+                if (mensagemPrincipal) {
+                    await mensagemPrincipal.edit({
+                        embeds: [criarEmbedTicket(canal)],
+                        components: criarBotoesTicket()
+                    });
+                }
+
+                await canal.send({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor(0x3498DB)
+                            .setTitle("🔄 Ticket transferido")
+                            .setDescription(
+                                `O atendimento agora está sob responsabilidade de ${novoAtendente}.`
+                            )
+                            .setTimestamp()
                     ]
                 });
+
+                return;
             }
 
-            await interaction.channel.send({
-                content:
-                    '🔄 Atendimento transferido para ' +
-                    novoAtendente.toString() +
-                    '.'
-            });
+            //================================================
+            // ADICIONAR JOGADOR: ABRIR SELETOR
+            //================================================
 
-            return interaction.update({
-                content:
-                    '✅ Ticket transferido para ' +
-                    novoAtendente.toString() + '.',
-                components: []
-            });
-        }
-
-        // ====================================================
-        // ADICIONAR JOGADOR AO TICKET
-        // ====================================================
-
-        if (
-            interaction.isUserSelectMenu() &&
-            interaction.customId === 'adicionar_selecionar'
-        ) {
-            if (!ehTicket(interaction.channel)) {
-                return interaction.reply({
-                    content: '❌ Ticket inválido.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            if (!(await podeGerenciarTicket(interaction))) {
-                return interaction.reply({
-                    content: '❌ Você não é o atendente responsável.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const usuarioId = interaction.values[0];
-
-            const membro =
-                await interaction.guild.members.fetch(usuarioId)
-                    .catch(() => null);
-
-            if (!membro) {
-                return interaction.reply({
-                    content:
-                        '❌ Não consegui encontrar esse membro no servidor.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const dados = lerTopico(interaction.channel);
-
-            if (usuarioId === dados['ticket-user']) {
-                return interaction.reply({
-                    content:
-                        '⚠️ Esse jogador já é o criador do ticket.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            await interaction.channel.permissionOverwrites.edit(
-                usuarioId,
-                {
-                    ViewChannel: true,
-                    SendMessages: true,
-                    ReadMessageHistory: true,
-                    AttachFiles: true,
-                    EmbedLinks: true
+            if (
+                interaction.isButton() &&
+                interaction.customId === "adm_adicionar"
+            ) {
+                if (!ehAtendenteResponsavel(interaction)) {
+                    return interaction.reply({
+                        content:
+                            "❌ Somente o atendente responsável pode adicionar jogadores.",
+                        ephemeral: true
+                    });
                 }
-            );
 
-            await interaction.channel.send({
-                content:
-                    '➕ ' + membro.toString() +
-                    ' foi adicionado ao ticket por ' +
-                    interaction.user.toString() + '.'
-            });
+                const seletor = new UserSelectMenuBuilder()
+                    .setCustomId("adicionar_selecionar")
+                    .setPlaceholder("Selecione o jogador")
+                    .setMinValues(1)
+                    .setMaxValues(1);
 
-            return interaction.update({
-                content:
-                    '✅ ' + membro.toString() +
-                    ' agora tem acesso ao ticket.',
-                components: []
-            });
-        }
-
-        // ====================================================
-        // FECHAR TICKET: ABRIR QUESTIONÁRIO
-        // ====================================================
-
-        if (
-            interaction.isButton() &&
-            interaction.customId === 'ticket_fechar'
-        ) {
-            const canal = interaction.channel;
-
-            if (!ehTicket(canal)) {
-                return interaction.reply({
-                    content: '❌ Este canal não é um ticket válido.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const dados = lerTopico(canal);
-
-            if (dados.status === 'closed') {
-                return interaction.reply({
-                    content: '❌ Este ticket já está encerrado.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const usuarioId = dados['ticket-user'];
-
-            const equipe = await membroEhEquipe(interaction);
-            const admin = await membroEhAdministrador(interaction);
-
-            const criador = usuarioId === interaction.user.id;
-
-            if (!criador && !equipe && !admin) {
-                return interaction.reply({
+                await interaction.reply({
                     content:
-                        '❌ Você não tem permissão para fechar este ticket.',
-                    flags: MessageFlags.Ephemeral
+                        "➕ Selecione o jogador que deseja adicionar ao ticket.",
+                    components: [
+                        new ActionRowBuilder().addComponents(seletor)
+                    ],
+                    ephemeral: true
                 });
+
+                return;
             }
 
-            const modal = new ModalBuilder()
-                .setCustomId('modal_fechar_ticket')
-                .setTitle('Encerrar atendimento');
+            //================================================
+            // ADICIONAR JOGADOR: PROCESSAR SELEÇÃO
+            //================================================
 
-            const campo = new TextInputBuilder()
-                .setCustomId('motivo_fechamento')
-                .setLabel('Motivo do fechamento')
-                .setPlaceholder(
-                    'Explique por que este atendimento está sendo encerrado.'
-                )
-                .setStyle(TextInputStyle.Paragraph)
-                .setMinLength(3)
-                .setMaxLength(1000)
-                .setRequired(true);
-
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(campo)
-            );
-
-            return interaction.showModal(modal);
-        }
-
-        // ====================================================
-        // MODAL: CONFIRMAR FECHAMENTO
-        // ====================================================
-
-        if (
-            interaction.isModalSubmit() &&
-            interaction.customId === 'modal_fechar_ticket'
-        ) {
-            const canal = interaction.channel;
-
-            if (!ehTicket(canal)) {
-                return interaction.reply({
-                    content: '❌ Ticket inválido.',
-                    flags: MessageFlags.Ephemeral
+            if (
+                interaction.isUserSelectMenu() &&
+                interaction.customId === "adicionar_selecionar"
+            ) {
+                await interaction.deferReply({
+                    ephemeral: true
                 });
-            }
 
-            const dados = lerTopico(canal);
+                const canal = interaction.channel;
 
-            if (dados.status === 'closed') {
-                return interaction.reply({
-                    content: '❌ Este ticket já foi encerrado.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
+                if (!ehTicket(canal)) {
+                    return interaction.editReply(
+                        "❌ Este canal não é um ticket válido."
+                    );
+                }
 
-            const usuarioId = dados['ticket-user'];
+                if (!ehAtendenteResponsavel(interaction)) {
+                    return interaction.editReply(
+                        "❌ Somente o atendente responsável pode adicionar jogadores."
+                    );
+                }
 
-            const equipe = await membroEhEquipe(interaction);
-            const admin = await membroEhAdministrador(interaction);
+                const jogadorId = interaction.values[0];
 
-            const criador = usuarioId === interaction.user.id;
+                if (jogadorId === canal.guild.members.me?.id) {
+                    return interaction.editReply(
+                        "❌ Não é necessário adicionar o próprio bot."
+                    );
+                }
 
-            if (!criador && !equipe && !admin) {
-                return interaction.reply({
-                    content:
-                        '❌ Você não tem permissão para fechar este ticket.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const motivo = interaction.fields
-                .getTextInputValue('motivo_fechamento');
-
-            const atendenteId =
-                dados.attendant && dados.attendant !== 'none'
-                    ? dados.attendant
-                    : null;
-
-            await atualizarTopico(canal, {
-                status: 'closed'
-            });
-
-            const embedFechamento = new EmbedBuilder()
-                .setColor(COR_PRINCIPAL)
-                .setTitle('🔒 ATENDIMENTO ENCERRADO')
-                .addFields(
-                    {
-                        name: '👤 Cliente',
-                        value: '<@' + usuarioId + '>',
-                        inline: true
-                    },
-                    {
-                        name: '🟢 Atendente',
-                        value: atendenteId
-                            ? '<@' + atendenteId + '>'
-                            : 'Nenhum atendente',
-                        inline: true
-                    },
-                    {
-                        name: '📝 Motivo do fechamento',
-                        value: motivo.slice(0, 1000),
-                        inline: false
-                    }
-                )
-                .setFooter({
-                    text: 'Adamantina Roleplay • Atendimento'
-                })
-                .setTimestamp();
-
-            await interaction.reply({
-                content:
-                    '🔒 O ticket foi encerrado. O usuário receberá uma solicitação de avaliação quando houver um atendente responsável.',
-                flags: MessageFlags.Ephemeral
-            });
-
-            await canal.send({
-                embeds: [embedFechamento]
-            });
-
-            // -----------------------------------------------
-            // ENVIAR AVALIAÇÃO POR DM
-            // -----------------------------------------------
-
-            if (atendenteId) {
                 try {
-                    const usuario = await client.users.fetch(
-                        usuarioId
+                    // Busca apenas o usuário selecionado.
+
+                    const jogador =
+                        interaction.guild.members.cache.get(jogadorId) ||
+                        await interaction.guild.members.fetch(jogadorId);
+
+                    await canal.permissionOverwrites.edit(
+                        jogador.id,
+                        {
+                            ViewChannel: true,
+                            SendMessages: true,
+                            ReadMessageHistory: true,
+                            AttachFiles: true,
+                            EmbedLinks: true
+                        }
                     );
 
-                    const configuracao = obterConfiguracao(canal);
-
-                    await usuario.send({
+                    await canal.send({
                         embeds: [
                             new EmbedBuilder()
-                                .setColor(COR_AVALIACAO)
-                                .setTitle('⭐ AVALIE SEU ATENDIMENTO')
+                                .setColor(0x2ECC71)
                                 .setDescription(
-                                    'Seu atendimento na **Adamantina Roleplay** foi encerrado!\n\n' +
-                                    '🟢 **Atendente:** <@' +
-                                    atendenteId + '>\n' +
-                                    '🎫 **Categoria:** ' +
-                                    configuracao.titulo + '\n\n' +
-                                    'Como você avalia o atendimento recebido?\n\n' +
-                                    'Clique em uma das notas abaixo. Sua avaliação será enviada ao canal de avaliações.'
+                                    `➕ ${jogador} foi adicionado ao ticket por ${interaction.user}.`
                                 )
                                 .setTimestamp()
-                        ],
-
-                        components: [
-                            criarBotoesAvaliacao(
-                                usuarioId,
-                                atendenteId,
-                                dados['ticket-type'],
-                                canal.id
-                            )
                         ]
                     });
+
+                    return interaction.editReply(
+                        `✅ ${jogador} foi adicionado ao ticket.`
+                    );
+
                 } catch (erro) {
                     console.error(
-                        '❌ Não foi possível enviar a DM de avaliação:',
+                        "Erro ao adicionar jogador:",
                         erro.message
                     );
 
-                    await canal.send(
-                        '⚠️ Não consegui enviar a avaliação por DM. O usuário pode estar com mensagens privadas bloqueadas.'
-                    ).catch(() => {});
+                    return interaction.editReply(
+                        "❌ Não consegui adicionar esse jogador. " +
+                        "Verifique as permissões do bot."
+                    );
                 }
-            } else {
-                await canal.send(
-                    '⚠️ Este ticket foi encerrado sem um atendente atribuído; por isso, não será solicitada uma avaliação.'
-                ).catch(() => {});
             }
 
-            // Mantém o canal por 15 segundos para a equipe
-            // conseguir visualizar o encerramento.
-            setTimeout(async () => {
+            //================================================
+            // FECHAR TICKET: ABRIR MODAL
+            //================================================
+
+            if (
+                interaction.isButton() &&
+                interaction.customId === "ticket_fechar"
+            ) {
+                const canal = interaction.channel;
+
+                if (!ehTicket(canal)) {
+                    return interaction.reply({
+                        content: "❌ Este canal não é um ticket válido.",
+                        ephemeral: true
+                    });
+                }
+
+                const dados = lerTopico(canal);
+
+                if (dados.status === "closed") {
+                    return interaction.reply({
+                        content: "❌ Este ticket já está fechado.",
+                        ephemeral: true
+                    });
+                }
+
+                const podeFechar =
+                    interaction.user.id === dados.usuarioId ||
+                    ehEquipe(interaction);
+
+                if (!podeFechar) {
+                    return interaction.reply({
+                        content:
+                            "❌ Você não tem permissão para fechar este ticket.",
+                        ephemeral: true
+                    });
+                }
+
+                const modal = new ModalBuilder()
+                    .setCustomId("ticket_fechar_modal")
+                    .setTitle("Fechar ticket");
+
+                const campoMotivo = new TextInputBuilder()
+                    .setCustomId("motivo_fechamento")
+                    .setLabel("Motivo do fechamento")
+                    .setPlaceholder("Explique por que o ticket está sendo fechado.")
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setMinLength(3)
+                    .setMaxLength(500)
+                    .setRequired(true);
+
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(campoMotivo)
+                );
+
+                await interaction.showModal(modal);
+
+                return;
+            }
+
+            //================================================
+            // FECHAR TICKET: PROCESSAR MODAL
+            //================================================
+
+            if (
+                interaction.isModalSubmit() &&
+                interaction.customId === "ticket_fechar_modal"
+            ) {
+                const canal = interaction.channel;
+
+                if (!ehTicket(canal)) {
+                    return interaction.reply({
+                        content: "❌ Este canal não é um ticket válido.",
+                        ephemeral: true
+                    });
+                }
+
+                const dados = lerTopico(canal);
+
+                if (dados.status === "closed") {
+                    return interaction.reply({
+                        content: "❌ Este ticket já está fechado.",
+                        ephemeral: true
+                    });
+                }
+
+                const podeFechar =
+                    interaction.user.id === dados.usuarioId ||
+                    ehEquipe(interaction);
+
+                if (!podeFechar) {
+                    return interaction.reply({
+                        content:
+                            "❌ Você não tem permissão para fechar este ticket.",
+                        ephemeral: true
+                    });
+                }
+
+                const motivo =
+                    interaction.fields.getTextInputValue(
+                        "motivo_fechamento"
+                    );
+
+                await atualizarTopico(canal, {
+                    status: "closed"
+                });
+
+                await interaction.reply({
+                    content: "🔒 Ticket fechado com sucesso.",
+                    ephemeral: true
+                });
+
+                await canal.send({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor(0x808080)
+                            .setTitle("🔒 Ticket fechado")
+                            .addFields(
+                                {
+                                    name: "👤 Fechado por",
+                                    value: `${interaction.user}`,
+                                    inline: true
+                                },
+                                {
+                                    name: "🛠️ Atendente",
+                                    value: dados.atendenteId
+                                        ? `<@${dados.atendenteId}>`
+                                        : "Nenhum atendente",
+                                    inline: true
+                                },
+                                {
+                                    name: "📝 Motivo",
+                                    value: motivo,
+                                    inline: false
+                                }
+                            )
+                            .setTimestamp()
+                    ],
+                    components: []
+                });
+
+                // Tenta atualizar a mensagem principal.
+
                 try {
-                    await canal.delete(
-                        'Ticket encerrado: ' + motivo
+                    const mensagens =
+                        await canal.messages.fetch({
+                            limit: 50
+                        });
+
+                    const mensagemPrincipal = mensagens.find(
+                        mensagem =>
+                            mensagem.author.id === client.user.id &&
+                            mensagem.embeds.some(
+                                embed =>
+                                    embed.title ===
+                                    "🎟️ Adamantina Roleplay | Ticket"
+                            )
                     );
+
+                    if (mensagemPrincipal) {
+                        await mensagemPrincipal.edit({
+                            embeds: [criarEmbedTicket(canal)],
+                            components: []
+                        });
+                    }
                 } catch (erro) {
                     console.error(
-                        '❌ Erro ao excluir ticket:',
+                        "Erro ao atualizar mensagem do ticket:",
                         erro.message
                     );
                 }
-            }, 15000);
-        }
 
-        // ====================================================
-        // RECEBER AVALIAÇÃO
-        // ====================================================
+                // Envia a avaliação somente se houver atendente.
 
-        if (
-            interaction.isButton() &&
-            interaction.customId.startsWith('avaliar:')
-        ) {
-            const partes = interaction.customId.split(':');
+                if (dados.atendenteId) {
+                    try {
+                        const criador = await client.users.fetch(
+                            dados.usuarioId
+                        );
 
-            const nota = Number(partes[1]);
-            const usuarioId = partes[2];
-            const atendenteId = partes[3];
-            const tipo = partes[4];
-            const ticketId = partes[5];
+                        const embedAvaliacao = new EmbedBuilder()
+                            .setColor(0xF1C40F)
+                            .setTitle("⭐ Avalie seu atendimento")
+                            .setDescription(
+                                "Seu ticket foi fechado.\n\n" +
+                                "Como foi o atendimento recebido?\n" +
+                                "Escolha uma nota de 1 a 5 estrelas."
+                            )
+                            .addFields(
+                                {
+                                    name: "🎫 Categoria",
+                                    value: dados.tipo || "Não informada",
+                                    inline: true
+                                },
+                                {
+                                    name: "🛠️ Atendente",
+                                    value: `<@${dados.atendenteId}>`,
+                                    inline: true
+                                }
+                            );
 
-            if (
-                !Number.isInteger(nota) ||
-                nota < 1 ||
-                nota > 5
-            ) {
-                return interaction.reply({
-                    content: '❌ Nota de avaliação inválida.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
+                        const botoes = [];
 
-            if (interaction.user.id !== usuarioId) {
-                return interaction.reply({
-                    content:
-                        '❌ Somente o cliente deste atendimento pode avaliá-lo.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
+                        for (let nota = 1; nota <= 5; nota++) {
+                            botoes.push(
+                                new ButtonBuilder()
+                                    .setCustomId(
+                                        `avaliar:${nota}:${dados.usuarioId}:` +
+                                        `${dados.atendenteId}:` +
+                                        `${encodeURIComponent(dados.tipo || "Suporte")}:` +
+                                        `${canal.id}`
+                                    )
+                                    .setLabel(`${nota} ⭐`)
+                                    .setStyle(
+                                        nota <= 3
+                                            ? ButtonStyle.Secondary
+                                            : ButtonStyle.Success
+                                    )
+                            );
+                        }
 
-            const canalAvaliacoes =
-                await client.channels.fetch(CANAL_AVALIACOES)
-                    .catch(() => null);
+                        const linha = new ActionRowBuilder()
+                            .addComponents(...botoes);
 
-            if (
-                !canalAvaliacoes ||
-                !canalAvaliacoes.isTextBased()
-            ) {
-                return interaction.reply({
-                    content:
-                        '❌ Não consegui encontrar o canal de avaliações. Avise um administrador.',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
+                        await criador.send({
+                            embeds: [embedAvaliacao],
+                            components: [linha]
+                        });
 
-            const configuracao = TIPOS_TICKET[tipo] || {
-                titulo: 'Atendimento'
-            };
-
-            const estrelas = '⭐'.repeat(nota);
-            const estrelasVazias = '☆'.repeat(5 - nota);
-
-            const embedAvaliacao = new EmbedBuilder()
-                .setColor(COR_AVALIACAO)
-                .setTitle('📊 NOVA AVALIAÇÃO DE ATENDIMENTO')
-                .addFields(
-                    {
-                        name: '👤 Cliente',
-                        value: '<@' + usuarioId + '>',
-                        inline: true
-                    },
-                    {
-                        name: '🟢 Atendente',
-                        value: '<@' + atendenteId + '>',
-                        inline: true
-                    },
-                    {
-                        name: '📁 Categoria',
-                        value: configuracao.titulo,
-                        inline: true
-                    },
-                    {
-                        name: '⭐ Nota',
-                        value:
-                            estrelas + estrelasVazias +
-                            ' (' + nota + '/5)',
-                        inline: false
-                    },
-                    {
-                        name: '🎫 Identificação do ticket',
-                        value: ticketId,
-                        inline: false
+                    } catch (erro) {
+                        console.error(
+                            "Não foi possível enviar a avaliação por DM:",
+                            erro.message
+                        );
                     }
-                )
-                .setFooter({
-                    text: 'Adamantina Roleplay • Avaliações'
-                })
-                .setTimestamp();
+                }
 
-            await canalAvaliacoes.send({
-                embeds: [embedAvaliacao]
-            });
+                // Exclui o canal após 15 segundos.
 
-            // Desativa os botões para evitar nova avaliação
-            // pelo mesmo formulário de DM.
-            await interaction.update({
-                content:
-                    '✅ Obrigado! Sua avaliação de ' +
-                    nota + '/5 foi registrada. Agradecemos por avaliar o atendimento da Adamantina Roleplay!',
-                embeds: [],
-                components: []
-            });
-        }
+                setTimeout(async () => {
+                    try {
+                        const canalAtual =
+                            interaction.guild.channels.cache.get(
+                                canal.id
+                            );
 
-    } catch (erro) {
-        console.error('❌ Erro na interação:', erro);
+                        if (canalAtual) {
+                            await canalAtual.delete(
+                                "Ticket fechado; exclusão automática após 15 segundos."
+                            );
+                        }
+                    } catch (erro) {
+                        console.error(
+                            "Erro ao excluir ticket:",
+                            erro.message
+                        );
+                    }
+                }, TEMPO_EXCLUSAO);
 
-        const mensagem =
-            '❌ Ocorreu um erro ao executar esta ação. Confira as permissões e os logs da hospedagem.';
+                return;
+            }
 
-        if (interaction.deferred) {
-            await interaction.editReply({
-                content: mensagem
-            }).catch(() => {});
-        } else if (interaction.replied) {
-            await interaction.followUp({
-                content: mensagem,
-                flags: MessageFlags.Ephemeral
-            }).catch(() => {});
-        } else {
-            await interaction.reply({
-                content: mensagem,
-                flags: MessageFlags.Ephemeral
-            }).catch(() => {});
+            //================================================
+            // REGISTRAR AVALIAÇÃO
+            //================================================
+
+            if (
+                interaction.isButton() &&
+                interaction.customId.startsWith("avaliar:")
+            ) {
+                const partes = interaction.customId.split(":");
+
+                const nota = Number(partes[1]);
+                const criadorId = partes[2];
+                const atendenteId = partes[3];
+                const tipo = decodeURIComponent(partes[4]);
+                const ticketId = partes[5];
+
+                if (
+                    !Number.isInteger(nota) ||
+                    nota < 1 ||
+                    nota > 5
+                ) {
+                    return interaction.reply({
+                        content: "❌ Esta avaliação é inválida.",
+                        ephemeral: true
+                    });
+                }
+
+                if (interaction.user.id !== criadorId) {
+                    return interaction.reply({
+                        content:
+                            "❌ Somente o criador do ticket pode avaliar este atendimento.",
+                        ephemeral: true
+                    });
+                }
+
+                const chaveAvaliacao =
+                    `${ticketId}:${criadorId}`;
+
+                if (avaliacoesRegistradas.has(chaveAvaliacao)) {
+                    return interaction.reply({
+                        content:
+                            "❌ Você já avaliou este atendimento.",
+                        ephemeral: true
+                    });
+                }
+
+                const canalAvaliacoes =
+                    interaction.client.channels.cache.get(
+                        CANAL_AVALIACOES
+                    );
+
+                if (!canalAvaliacoes) {
+                    return interaction.reply({
+                        content:
+                            "❌ Não encontrei o canal de avaliações. " +
+                            "Avise a administração.",
+                        ephemeral: true
+                    });
+                }
+
+                const estrelas = "⭐".repeat(nota);
+
+                const embed = new EmbedBuilder()
+                    .setColor(
+                        nota >= 4 ? 0x2ECC71 :
+                        nota === 3 ? 0xF1C40F :
+                        0xE74C3C
+                    )
+                    .setTitle("📊 Nova avaliação de atendimento")
+                    .addFields(
+                        {
+                            name: "👤 Cliente",
+                            value: `<@${criadorId}>`,
+                            inline: true
+                        },
+                        {
+                            name: "🛠️ Atendente",
+                            value: `<@${atendenteId}>`,
+                            inline: true
+                        },
+                        {
+                            name: "⭐ Nota",
+                            value: `${estrelas} (${nota}/5)`,
+                            inline: false
+                        },
+                        {
+                            name: "🎫 Categoria",
+                            value: tipo || "Não informada",
+                            inline: true
+                        },
+                        {
+                            name: "🆔 Ticket",
+                            value: ticketId,
+                            inline: true
+                        }
+                    )
+                    .setFooter({
+                        text: "Adamantina Roleplay • Avaliações"
+                    })
+                    .setTimestamp();
+
+                try {
+                    await canalAvaliacoes.send({
+                        embeds: [embed]
+                    });
+
+                    avaliacoesRegistradas.add(chaveAvaliacao);
+
+                    await interaction.update({
+                        content:
+                            `✅ Obrigado por avaliar o atendimento com ${nota} estrela(s)!`,
+                        embeds: [],
+                        components: []
+                    });
+
+                } catch (erro) {
+                    console.error(
+                        "Erro ao registrar avaliação:",
+                        erro.message
+                    );
+
+                    if (!interaction.replied && !interaction.deferred) {
+                        await interaction.reply({
+                            content:
+                                "❌ Não consegui registrar sua avaliação.",
+                            ephemeral: true
+                        });
+                    }
+                }
+
+                return;
+            }
+
+        } catch (erro) {
+            console.error(
+                "❌ Erro na interação:",
+                erro
+            );
+
+            // Evita que uma falha deixe a interação sem resposta.
+
+            try {
+                if (
+                    interaction.isRepliable() &&
+                    !interaction.replied &&
+                    !interaction.deferred
+                ) {
+                    await interaction.reply({
+                        content:
+                            "❌ Ocorreu um erro ao executar esta ação. " +
+                            "Verifique os logs do bot.",
+                        ephemeral: true
+                    });
+                }
+            } catch (erroResposta) {
+                console.error(
+                    "Erro ao responder à interação:",
+                    erroResposta.message
+                );
+            }
         }
     }
+);
+
+//============================================================
+// TRATAMENTO DE ERROS DO PROCESSO
+//============================================================
+
+process.on("unhandledRejection", erro => {
+    console.error(
+        "❌ Promise rejeitada:",
+        erro
+    );
 });
 
-// ============================================================
-// INICIAR BOT
-// ============================================================
-
-if (!process.env.DISCORD_TOKEN) {
+process.on("uncaughtException", erro => {
     console.error(
-        '❌ A variável DISCORD_TOKEN não foi configurada.'
+        "❌ Erro inesperado:",
+        erro
     );
+});
 
-    process.exit(1);
+//============================================================
+// LOGIN
+//============================================================
+
+if (!TOKEN) {
+    console.error(
+        "❌ A variável DISCORD_TOKEN não foi configurada."
+    );
+} else {
+    client.login(TOKEN).catch(erro => {
+        console.error(
+            "❌ Não foi possível conectar o bot:",
+            erro
+        );
+    });
 }
-
-client.login(process.env.DISCORD_TOKEN);
